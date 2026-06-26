@@ -206,20 +206,51 @@ async function publicarTweet(driver, mensaje, dryRun) {
     10000
   );
 
-  // Limpiar y escribir el mensaje (usamos script inyectado para soportar Emojis / caracteres fuera del BMP)
+  // Limpiar y escribir el mensaje
   await textbox.click();
   await sleep(500);
   
   await driver.executeScript((el, text) => {
     el.focus();
-    // Limpiar contenido existente por si acaso
+    
+    // Buscar el contenedor de bloques interno o el span de texto de Draft.js
+    const target = el.querySelector('[data-text="true"], [data-offset-key], .public-DraftStyleDefault-block') || el;
+    
+    // Crear una selección justo en el target interno
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(true); // Colapsar al inicio del target
+    
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    
+    // Limpiar contenido previo
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
-    // Escribir el nuevo texto (soporta emojis nativamente)
+    
+    // Escribir el nuevo texto dentro del target enfocado
     document.execCommand('insertText', false, text);
+    
+    // Colapsar la selección al final del elemento para prepararlo para sendKeys
+    const rangeEnd = document.createRange();
+    rangeEnd.selectNodeContents(el);
+    rangeEnd.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(rangeEnd);
+
+    // Disparar eventos de actualización
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    el.dispatchEvent(new Event('input', { bubbles: true }));
   }, textbox, mensaje);
   
-  await sleep(1500); // Esperar a que se renderice el texto y mención
+  await sleep(800);
+  // Escribir una letra real al final y borrarla usando teclado físico simulado (caracteres del BMP)
+  // Esto fuerza a Draft.js/React a registrar todo el texto previo y habilitar el botón
+  await textbox.sendKeys('x');
+  await sleep(300);
+  await textbox.sendKeys(Key.BACK_SPACE);
+  await sleep(2000); // Esperar a que se renderice el texto y mención
 
   if (dryRun) {
     console.log(chalk.yellow('   ⚠️ [DRY RUN] Simulación de envío:'));
