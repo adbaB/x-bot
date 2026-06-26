@@ -21,6 +21,21 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─── Configuración ──────────────────────────────────────────
 const CONFIG = {
+  // Variantes de mensajes. Si hay más de una, el bot elegirá una para cada post.
+  messages: [
+    `🚨 {usuario} Necesitamos apoyo para difundir esta herramienta. En este portal se está unificando la información verificada, puntos de acopio y reportes del terremoto en Venezuela.
+🔗 https://terremotovenezuela.app/
+¡Agradecemos tu RT para llegar a más personas! 🙌`,
+    `📌 {usuario} ¿Nos ayudas a compartir? Crearon una plataforma que centraliza reportes de daños, centros de ayuda y canales oficiales por el sismo en Venezuela. Toda la info en un solo lugar:
+👉 https://terremotovenezuela.app/
+#TerremotoVenezuela`,
+    `🇻🇪 Ante la emergencia, la información correcta salva vidas. {usuario}, ayúdanos a hacer eco de esta iniciativa que reúne mapas de reportes y centros de acopio en el país:
+🌐 https://terremotovenezuela.app/
+¡Tu difusión es vital en este momento! RT`,
+    `📦 Si necesitas reportar una incidencia o buscas dónde llevar donaciones por el temblor en Venezuela, esta app centraliza la ayuda. {usuario}, ayúdanos a que más gente la conozca:
+🔗 https://terremotovenezuela.app/`
+  ],
+
   message: `¡Hola {usuario}! 👋
 
 Te comparto esta información importante:
@@ -29,9 +44,15 @@ Te comparto esta información importante:
 
 ¡Saludos! 🚀`,
 
+  // Modo de selección de variante: 'random' (aleatorio) o 'round-robin' (secuencial)
+  variantMode: 'round-robin',
+
   usuarios: ['usuario1', 'usuario2', 'usuario3'],
   delayMs: 8000, // Mayor delay para Selenium para imitar comportamiento humano
   batchSize: 0,
+
+  // Tweets por cuenta antes de cambiar de cuenta
+  tweetsPerAccount: 5,
 };
 
 // ─── Parsear argumentos CLI ─────────────────────────────────
@@ -45,7 +66,11 @@ function getArg(flag) {
 
 if (getArg('--delay')) CONFIG.delayMs = parseInt(getArg('--delay'), 10);
 if (getArg('--batch')) CONFIG.batchSize = parseInt(getArg('--batch'), 10);
-if (getArg('--message')) CONFIG.message = getArg('--message');
+if (getArg('--tweets-per-account')) CONFIG.tweetsPerAccount = parseInt(getArg('--tweets-per-account'), 10);
+if (getArg('--message')) {
+  CONFIG.message = getArg('--message');
+  CONFIG.messages = []; // Limpiamos para usar el mensaje único
+}
 
 // ─── Cargar usuarios y procesados ───────────────────────────
 function cargarUsuarios() {
@@ -74,14 +99,30 @@ function marcarProcesado(usuario) {
   appendFileSync(resolve(__dirname, 'procesados.log'), usuario + '\n', 'utf-8');
 }
 
+// ─── Cargar cuentas ──────────────────────────────────────────
+function cargarCuentas() {
+  const file = resolve(__dirname, 'cuentas.json');
+  if (!existsSync(file)) return [];
+  try {
+    const list = JSON.parse(readFileSync(file, 'utf-8'));
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+  } catch (error) {
+    console.error(chalk.red(`❌ Error al leer cuentas.json: ${error.message}`));
+  }
+  return [];
+}
+
 // ─── Utilidades ─────────────────────────────────────────────
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const ts = () => new Date().toLocaleString('es-ES');
 
 // ─── Lógica de Navegador (Selenium) ──────────────────────────
 
-async function inicializarDriver() {
-  const profileDir = resolve(__dirname, '.chrome_profile');
+async function inicializarDriver(username) {
+  const suffix = username ? `_${username}` : '';
+  const profileDir = resolve(__dirname, `.chrome_profile${suffix}`);
   if (!existsSync(profileDir)) {
     mkdirSync(profileDir, { recursive: true });
   }
@@ -239,17 +280,62 @@ async function main() {
   if (dryRun) console.log(chalk.yellow('⚠️  Ejecutando en Modo DRY RUN (Simulación)'));
   console.log(chalk.gray('─'.repeat(60)));
 
-  let driver;
-  try {
-    driver = await inicializarDriver();
-    await loginX(driver);
+  const cuentas = cargarCuentas();
+  if (cuentas.length > 0) {
+    console.log(chalk.cyan(`👥 Cargadas ${cuentas.length} cuentas desde cuentas.json`));
+  }
 
+  let driver = null;
+  let currentAccountIndex = -2; // Valor que no coincida con -1 o 0
+
+  try {
     let exitosos = 0;
     let fallidos = 0;
 
     for (let i = 0; i < usuarios.length; i++) {
       const usuario = usuarios[i];
-      const mensaje = CONFIG.message.replace(/\{usuario\}/g, `@${usuario}`);
+      
+      // Determinar cuenta y rotar si es necesario
+      const accountIndex = cuentas.length > 0 
+        ? Math.floor(i / CONFIG.tweetsPerAccount) % cuentas.length 
+        : -1;
+
+      if (accountIndex !== currentAccountIndex) {
+        currentAccountIndex = accountIndex;
+        if (driver) {
+          console.log(chalk.blue('   🔌 Cerrando navegador de la cuenta anterior...'));
+          try {
+            await driver.quit();
+          } catch (e) {}
+          driver = null;
+        }
+
+        const currentCuenta = accountIndex !== -1 ? cuentas[accountIndex] : null;
+        const currentUsername = currentCuenta ? currentCuenta.username : null;
+
+        if (currentUsername) {
+          console.log(chalk.blue(`\n🔄 Cambiando a cuenta: @${currentUsername} (Lote de ${CONFIG.tweetsPerAccount})`));
+        } else {
+          console.log(chalk.blue(`\n🔄 Usando cuenta por defecto...`));
+        }
+
+        driver = await inicializarDriver(currentUsername);
+        await loginX(driver);
+      }
+      
+      // Seleccionar plantilla del mensaje (variante)
+      let plantilla = CONFIG.message;
+      if (CONFIG.messages && CONFIG.messages.length > 0) {
+        if (CONFIG.variantMode === 'round-robin') {
+          plantilla = CONFIG.messages[i % CONFIG.messages.length];
+        } else {
+          // Por defecto 'random'
+          const randomIndex = Math.floor(Math.random() * CONFIG.messages.length);
+          plantilla = CONFIG.messages[randomIndex];
+        }
+      }
+
+      const mensaje = plantilla.replace(/\{usuario\}/g, `@${usuario}`);
 
       console.log(chalk.white(`\n[${i + 1}/${usuarios.length}] → Enviando a @${usuario}...`));
 

@@ -20,7 +20,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ─── Configuración ──────────────────────────────────────────
 const CONFIG = {
-  // Mensaje. Usa {usuario} como placeholder para la mención.
+  // Variantes de mensajes. Si hay más de una, el bot elegirá una para cada post.
+  messages: [
+    `¡Hola {usuario}! 👋\n\nTe comparto esta información importante:\n\n🔗 [Tu info aquí]\n\n¡Saludos! 🚀`,
+    `¿Qué tal {usuario}? 😊\n\nQuería mostrarte este enlace con info de interés:\n\n🔗 [Tu info aquí]\n\n¡Que tengas un buen día! ✨`,
+    `¡Buenas {usuario}! ✌️\n\nTe recomiendo que le eches un vistazo a esto:\n\n🔗 [Tu info aquí]\n\n¡Nos vemos! 🙌`,
+    `¡Hola {usuario}! 🚀\n\nAquí tienes la información que te comentaba:\n\n🔗 [Tu info aquí]\n\n¡Un saludo! 🎈`
+  ],
+
+  // Mensaje por defecto (usado si messages está vacío o se sobreescribe con --message)
   message: `¡Hola {usuario}! 👋
 
 Te comparto esta información importante:
@@ -28,6 +36,9 @@ Te comparto esta información importante:
 🔗 [Tu info aquí]
 
 ¡Saludos! 🚀`,
+
+  // Modo de selección de variante: 'random' (aleatorio) o 'round-robin' (secuencial)
+  variantMode: "random",
 
   // Lista default (se sobreescribe con usuarios.txt)
   usuarios: ["usuario1", "usuario2", "usuario3"],
@@ -37,6 +48,9 @@ Te comparto esta información importante:
 
   // Batch size (0 = todos)
   batchSize: 0,
+
+  // Tweets por cuenta antes de cambiar de cuenta
+  tweetsPerAccount: 5,
 };
 
 // ─── Parsear argumentos CLI ─────────────────────────────────
@@ -50,7 +64,11 @@ function getArg(flag) {
 
 if (getArg("--delay")) CONFIG.delayMs = parseInt(getArg("--delay"), 10);
 if (getArg("--batch")) CONFIG.batchSize = parseInt(getArg("--batch"), 10);
-if (getArg("--message")) CONFIG.message = getArg("--message");
+if (getArg("--tweets-per-account")) CONFIG.tweetsPerAccount = parseInt(getArg("--tweets-per-account"), 10);
+if (getArg("--message")) {
+  CONFIG.message = getArg("--message");
+  CONFIG.messages = []; // Limpiamos para usar el mensaje único
+}
 
 // ─── Cargar usuarios ────────────────────────────────────────
 function cargarUsuarios() {
@@ -87,6 +105,21 @@ function marcarProcesado(usuario) {
   appendFileSync(resolve(__dirname, "procesados.log"), usuario + "\n", "utf-8");
 }
 
+// ─── Cargar cuentas ──────────────────────────────────────────
+function cargarCuentas() {
+  const file = resolve(__dirname, "cuentas.json");
+  if (!existsSync(file)) return [];
+  try {
+    const list = JSON.parse(readFileSync(file, "utf-8"));
+    if (Array.isArray(list) && list.length > 0) {
+      return list;
+    }
+  } catch (error) {
+    console.error(chalk.red(`❌ Error al leer cuentas.json: ${error.message}`));
+  }
+  return [];
+}
+
 // ─── Utilidades ─────────────────────────────────────────────
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const ts = () => new Date().toLocaleString("es-ES");
@@ -119,10 +152,28 @@ async function main() {
   console.log(chalk.bold.blue(`\n🤖 X Bot — ${ts()}\n`));
   console.log(chalk.gray("─".repeat(55)));
 
+  const cuentas = cargarCuentas();
+  if (cuentas.length > 0) {
+    console.log(chalk.cyan(`👥 Cargadas ${cuentas.length} cuentas desde cuentas.json`));
+  }
+
   if (dryRun) {
     console.log(chalk.yellow("⚠️  Modo DRY RUN — No se publicará nada\n"));
   } else {
-    validarCredenciales();
+    if (cuentas.length === 0) {
+      validarCredenciales();
+    } else {
+      // Validar cada cuenta del archivo json
+      for (let idx = 0; idx < cuentas.length; idx++) {
+        const c = cuentas[idx];
+        const missing = ["apiKey", "apiKeySecret", "accessToken", "accessTokenSecret"].filter(k => !c[k]);
+        if (missing.length > 0) {
+          console.error(chalk.red(`\n❌ Error: La cuenta #${idx + 1} (${c.username || "sin nombre"}) en cuentas.json no tiene:`));
+          missing.forEach(k => console.error(chalk.yellow(`   → ${k}`)));
+          process.exit(1);
+        }
+      }
+    }
   }
 
   // Cargar y filtrar usuarios
@@ -161,37 +212,9 @@ async function main() {
   );
   console.log(chalk.gray("─".repeat(55)));
 
-  // Crear cliente OAuth 1.0a
-  let client;
-  if (!dryRun) {
-    client = crearCliente({
-      apiKey: process.env.API_KEY,
-      apiKeySecret: process.env.API_KEY_SECRET,
-      accessToken: process.env.ACCESS_TOKEN,
-      accessTokenSecret: process.env.ACCESS_TOKEN_SECRET,
-    });
-
-    try {
-      const me = await client.getMe();
-      console.log(chalk.green(`\n✅ Autenticado: @${me.data.username}\n`));
-    } catch (error) {
-      console.log(
-        chalk.yellow(
-          `\n⚠️  Nota: No se pudo validar el nombre de usuario (${error.message}).`,
-        ),
-      );
-      console.log(
-        chalk.yellow(
-          '   Esto es común si usas el plan "Free" de X, que no permite leer perfiles.',
-        ),
-      );
-      console.log(
-        chalk.yellow(
-          "   El bot continuará e intentará publicar de todos modos...\n",
-        ),
-      );
-    }
-  }
+  // Lógica de rotación de clientes
+  let client = null;
+  let currentAccountIndex = -1;
 
   // ── Enviar posts ──
   let exitosos = 0;
@@ -200,7 +223,63 @@ async function main() {
 
   for (let i = 0; i < usuarios.length; i++) {
     const usuario = usuarios[i];
-    const texto = CONFIG.message.replace(/\{usuario\}/g, `@${usuario}`);
+    
+    // Rotar cuenta si hay múltiples cuentas configuradas
+    const accountIndex = cuentas.length > 0 
+      ? Math.floor(i / CONFIG.tweetsPerAccount) % cuentas.length 
+      : -1;
+
+    if (accountIndex !== currentAccountIndex) {
+      currentAccountIndex = accountIndex;
+      if (accountIndex !== -1) {
+        const cuenta = cuentas[accountIndex];
+        console.log(chalk.blue(`\n🔄 Cambiando a cuenta: @${cuenta.username || `cuenta_${accountIndex + 1}`} (Lote de ${CONFIG.tweetsPerAccount})`));
+        if (!dryRun) {
+          client = crearCliente({
+            apiKey: cuenta.apiKey,
+            apiKeySecret: cuenta.apiKeySecret,
+            accessToken: cuenta.accessToken,
+            accessTokenSecret: cuenta.accessTokenSecret,
+          });
+          try {
+            const me = await client.getMe();
+            console.log(chalk.green(`   ✅ Autenticado como: @${me.data.username}`));
+          } catch (error) {
+            console.log(chalk.yellow(`   ⚠️  Nota: No se pudo validar el nombre de la cuenta (${error.message}).`));
+          }
+        }
+      } else {
+        // Cuenta única legacy desde .env
+        if (i === 0 && !dryRun && !client) {
+          client = crearCliente({
+            apiKey: process.env.API_KEY,
+            apiKeySecret: process.env.API_KEY_SECRET,
+            accessToken: process.env.ACCESS_TOKEN,
+            accessTokenSecret: process.env.ACCESS_TOKEN_SECRET,
+          });
+          try {
+            const me = await client.getMe();
+            console.log(chalk.green(`\n✅ Autenticado: @${me.data.username}\n`));
+          } catch (error) {
+            console.log(chalk.yellow(`\n⚠️  Nota: No se pudo validar el nombre de usuario (${error.message}).`));
+          }
+        }
+      }
+    }
+
+    // Seleccionar plantilla del mensaje (variante)
+    let plantilla = CONFIG.message;
+    if (CONFIG.messages && CONFIG.messages.length > 0) {
+      if (CONFIG.variantMode === "round-robin") {
+        plantilla = CONFIG.messages[i % CONFIG.messages.length];
+      } else {
+        // Por defecto 'random'
+        const randomIndex = Math.floor(Math.random() * CONFIG.messages.length);
+        plantilla = CONFIG.messages[randomIndex];
+      }
+    }
+    
+    const texto = plantilla.replace(/\{usuario\}/g, `@${usuario}`);
 
     console.log(chalk.white(`[${i + 1}/${usuarios.length}] → @${usuario}`));
 

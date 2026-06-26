@@ -1,0 +1,16 @@
+[
+  {
+    "username": "cuenta_uno",
+    "apiKey": "TU_API_KEY",
+    "apiKeySecret": "TU_API_KEY_SECRET",
+    "accessToken": "TU_ACCESS_TOKEN",
+    "accessTokenSecret": "TU_ACCESS_TOKEN_SECRET"
+  },
+  {
+    "username": "cuenta_dos",
+    "apiKey": "TU_API_KEY",
+    "apiKeySecret": "TU_API_KEY_SECRET",
+    "accessToken": "TU_ACCESS_TOKEN",
+    "accessTokenSecret": "TU_ACCESS_TOKEN_SECRET"
+  }
+]
