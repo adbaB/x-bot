@@ -149,28 +149,6 @@ Para distribuir la carga entre varias cuentas y evitar límites o bloqueos:
 
 ---
 
-## ☁️ Integración en Serverless (ej. AWS Lambda o Vercel)
-
-El script `bot.js` exporta la función principal `main` y el objeto `CONFIG`. Esto te permite importarlo como un módulo de Node.js dentro de tus funciones Lambda o Vercel Serverless:
-
-```javascript
-import { main, CONFIG } from './bot.js';
-
-export async function handler(event) {
-  // Opcional: configurar parámetros dinámicamente desde el evento
-  CONFIG.batchSize = event.batchSize || 10;
-  
-  await main();
-  
-  return {
-    statusCode: 200,
-    body: JSON.stringify({ message: "Bot ejecutado exitosamente" })
-  };
-}
-```
-
----
-
 ## 💾 Archivos del Proyecto
 
 | Archivo | Descripción |
