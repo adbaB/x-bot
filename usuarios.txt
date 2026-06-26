@@ -1,0 +1,10 @@
+# Lista de usuarios a los que enviar el tweet (uno por línea)
+# Puedes usar @ o no, el bot lo maneja automáticamente
+# Las líneas que empiezan con # son comentarios y se ignoran
+#
+# Ejemplo:
+# usuario1
+# @usuario2
+# usuario3
+
+@albertobasabe4
