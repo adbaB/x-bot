@@ -64,15 +64,25 @@ usuario_ejemplo3
 
 ### 1. Ejecución Local (Pruebas)
 
-* **Modo Simulación (Dry Run):** Prueba el funcionamiento y el formato de los mensajes sin publicar realmente en X y sin gastar cuota de API.
-  ```bash
-  npm test
-  ```
+* **Bot de API Directa (OAuth):**
+  * **Modo Simulación (Dry Run):**
+    ```bash
+    npm test
+    ```
+  * **Ejecutar envíos reales:**
+    ```bash
+    npm start
+    ```
 
-* **Enviar posts reales:**
-  ```bash
-  npm start
-  ```
+* **Bot de Navegador Real (Selenium):**
+  * **Modo Simulación (Dry Run):**
+    ```bash
+    npm run selenium:test
+    ```
+  * **Ejecutar envíos reales:**
+    ```bash
+    npm run selenium
+    ```
 
 ### 2. Modificadores por CLI
 
@@ -85,9 +95,57 @@ node bot.js --batch 500
 # Cambiar el tiempo de espera entre posts (en milisegundos, por defecto 3000ms)
 node bot.js --delay 5000
 
-# Sobrescribir el mensaje predeterminado desde la terminal
+# Definir la cantidad de tweets antes de rotar a la siguiente cuenta (por defecto 5)
+node bot.js --tweets-per-account 10
+
+# Sobrescribir el mensaje predeterminado desde la terminal (desactiva las variantes)
 node bot.js --message "Hola {usuario}! Te invito a probar esto 🚀"
 ```
+
+---
+
+## 🔀 Variantes de Mensajes
+
+Para evitar que X detecte tus mensajes como spam, ambos bots soportan el uso de múltiples variantes de mensajes. El bot elegirá una variante diferente para cada usuario de forma aleatoria (por defecto) o secuencial.
+
+En el objeto `CONFIG` de ambos scripts puedes definir las variantes:
+- `messages`: Un array con plantillas de texto. Usa `{usuario}` para indicar dónde se colocará la mención (ej. `@nombreusuario`).
+- `variantMode`: `'random'` (aleatorio, por defecto) o `'round-robin'` (secuencial rotativo).
+
+---
+
+## 👥 Soporte Multi-cuenta (Rotación)
+
+Para distribuir la carga entre varias cuentas y evitar límites o bloqueos:
+
+1. Crea un archivo llamado `cuentas.json` en la raíz del proyecto (basándote en `cuentas.example.json`).
+2. Define tus cuentas con este formato:
+   ```json
+   [
+     {
+       "username": "cuenta_uno",
+       "apiKey": "TU_API_KEY",
+       "apiKeySecret": "TU_API_KEY_SECRET",
+       "accessToken": "TU_ACCESS_TOKEN",
+       "accessTokenSecret": "TU_ACCESS_TOKEN_SECRET"
+     },
+     {
+       "username": "cuenta_dos",
+       "apiKey": "TU_API_KEY",
+       "apiKeySecret": "TU_API_KEY_SECRET",
+       "accessToken": "TU_ACCESS_TOKEN",
+       "accessTokenSecret": "TU_ACCESS_TOKEN_SECRET"
+     }
+   ]
+   ```
+   *(Si solo usas Selenium, puedes omitir los campos de API key y tokens; solo se requiere `username`).*
+
+3. Configura el límite de tweets por cuenta antes de rotar:
+   - En `CONFIG.tweetsPerAccount` (por defecto `5`).
+   - O mediante el argumento de terminal `--tweets-per-account 10`.
+
+* **En el Bot de API (`bot.js`)**: El script cambiará las credenciales dinámicamente cada lote de tweets.
+* **En el Bot de Selenium (`selenium-bot.js`)**: El script abrirá y cerrará navegadores de Chrome con perfiles independientes (`.chrome_profile_<username>`) para mantener las sesiones de cada cuenta separadas e iniciadas de forma independiente.
 
 ---
 
@@ -117,9 +175,12 @@ export async function handler(event) {
 
 | Archivo | Descripción |
 |---|---|
-| `bot.js` | Script principal del bot y lógica de envío. |
+| `bot.js` | Script principal de envío directo usando la API de X. |
+| `selenium-bot.js` | Script principal de envío simulando un navegador Chrome real con Selenium. |
 | `x-client.js` | Cliente ligero para X API v2 usando firmas OAuth 1.0a sin SDKs pesados. |
 | `usuarios.txt` | Lista de nombres de usuario a mencionar. |
 | `procesados.log` | Registro auto-generado de usuarios ya contactados (evita duplicados). |
-| `.env` | Archivo de configuración para tus credenciales locales. |
+| `cuentas.json` | Lista de cuentas de X para rotación de envíos (ignorado en git). |
+| `cuentas.example.json` | Plantilla modelo para configurar `cuentas.json`. |
+| `.env` | Configuración para cuenta única legacy. |
 
