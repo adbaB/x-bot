@@ -1,16 +1,19 @@
 {
   "name": "x-bot-mentions",
   "version": "3.0.0",
-  "description": "Bot serverless para publicar posts en X con OAuth 1.0a",
+  "description": "Bot para publicar posts en X con OAuth 1.0a y Selenium",
   "main": "bot.js",
   "type": "module",
   "scripts": {
     "start": "node bot.js",
-    "test": "node bot.js --dry-run"
+    "test": "node bot.js --dry-run",
+    "selenium": "node selenium-bot.js",
+    "selenium:test": "node selenium-bot.js --dry-run"
   },
   "dependencies": {
     "oauth-1.0a": "^2.2.6",
     "dotenv": "^16.4.0",
-    "chalk": "^5.3.0"
+    "chalk": "^5.3.0",
+    "selenium-webdriver": "^4.22.0"
   }
 }
