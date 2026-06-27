@@ -213,44 +213,24 @@ async function publicarTweet(driver, mensaje, dryRun) {
   await driver.executeScript((el, text) => {
     el.focus();
     
-    // Buscar el contenedor de bloques interno o el span de texto de Draft.js
-    const target = el.querySelector('[data-text="true"], [data-offset-key], .public-DraftStyleDefault-block') || el;
-    
-    // Crear una selección justo en el target interno
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    range.collapse(true); // Colapsar al inicio del target
-    
-    const sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    
-    // Limpiar contenido previo
+    // Limpiar el editor completamente
     document.execCommand('selectAll', false, null);
     document.execCommand('delete', false, null);
     
-    // Escribir el nuevo texto dentro del target enfocado
-    document.execCommand('insertText', false, text);
+    // Crear un evento de Pegado (Paste) sintético
+    const dataTransfer = new DataTransfer();
+    dataTransfer.setData('text/plain', text);
+    const pasteEvent = new ClipboardEvent('paste', {
+      clipboardData: dataTransfer,
+      bubbles: true,
+      cancelable: true
+    });
     
-    // Colapsar la selección al final del elemento para prepararlo para sendKeys
-    const rangeEnd = document.createRange();
-    rangeEnd.selectNodeContents(el);
-    rangeEnd.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(rangeEnd);
-
-    // Disparar eventos de actualización
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    // Despachar el evento en el editor editable para que Draft.js procese los saltos de línea y emojis
+    el.dispatchEvent(pasteEvent);
   }, textbox, mensaje);
   
-  await sleep(800);
-  // Escribir una letra real al final y borrarla usando teclado físico simulado (caracteres del BMP)
-  // Esto fuerza a Draft.js/React a registrar todo el texto previo y habilitar el botón
-  await textbox.sendKeys('x');
-  await sleep(300);
-  await textbox.sendKeys(Key.BACK_SPACE);
-  await sleep(2000); // Esperar a que se renderice el texto y mención
+  await sleep(2500); // Esperar a que se procese el pegado, el formato y se rendericen las menciones
 
   if (dryRun) {
     console.log(chalk.yellow('   ⚠️ [DRY RUN] Simulación de envío:'));
@@ -273,8 +253,8 @@ async function publicarTweet(driver, mensaje, dryRun) {
     5000
   );
 
-  // Hacer clic en publicar
-  await postBtn.click();
+  // Hacer clic en publicar (usamos script inyectado para evitar que popups de autocompletado bloqueen el click)
+  await driver.executeScript('arguments[0].click();', postBtn);
   console.log(chalk.green('   ✅ Botón de publicar presionado.'));
   
   // Esperar a que se cierre el composer o aparezca confirmación
